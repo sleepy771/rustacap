@@ -1,0 +1,9 @@
+[package]
+name = "pcap_parse"
+version = "0.1.0"
+authors = ["Filip Hornak <sleepy771@gmail.com>"]
+
+[dependencies]
+pcap = "0.7.0"
+nom = "3.2.1"
+arrayref = "0.3.4"
