@@ -10,12 +10,13 @@ use pcap::{Device, Capture};
 use nom::{Endianness, IResult, be_u8};
 use std::net::Ipv4Addr;
 
+mod couters;
 
 fn main() {
     let device = Device::list()
         .unwrap()
         .into_iter()
-        .filter(|device| {device.name == "enp3s0"})
+        .filter(|device| {device.name == "enp6s0"})
         .next()
         .unwrap();
     let mut capture = Capture::from_device(device).unwrap()
@@ -27,21 +28,21 @@ fn main() {
     while let Ok(pkt) = capture.next() {
         if let IResult::Done(rest, frame) = ether_frame(pkt.data) {
             println!("{:?}", frame);
-            if frame.ethernet_type == EtherType::IPv4 {
+            if frame.ethernet_type == ether_type::IPV4 {
                 if let IResult::Done(ip_rest, ip_header) = ip_parse(rest) {
                     println!("{:?}", ip_header);
                     match ip_header.protocol {
-                        TransportProtocol::TCP => {
+                        transport_proto::TCP => {
                             if let IResult::Done(tcp_rest, tcp_header) = tcp_parser(ip_rest) {
                                 println!("{:?}", tcp_header);
                             }
                         },
-                        TransportProtocol::UDP => {
+                        transport_proto::UDP => {
                             if let IResult::Done(udp_payload, udp_header) = udp_parser(ip_rest) {
                                 println!("{:?}", udp_header);
                             }
                         },
-                        TransportProtocol::ICMP => {
+                        transport_proto::ICMP => {
                             if let IResult::Done(icmp_payload, icmp_header) = parse_icmp(ip_rest) {
                                 println!("{:?}", icmp_header)
                             }
@@ -53,7 +54,6 @@ fn main() {
         }
     }
 }
-
 
 fn list_devices(devices: Vec<Device>) {
     println!("===== Devices ======");
@@ -68,24 +68,13 @@ fn list_devices(devices: Vec<Device>) {
 }
 
 
-#[derive(Debug,PartialEq,Eq)]
-pub enum EtherType {
-    IPv4,
-    IPv6,
-    ARP,
-    VLAN
+pub mod ether_type {
+    pub const IPV4: u16 = 0x0800;
+    pub const IPV6: u16 = 0x86DD;
+    pub const ARP: u16 = 0x0806;
+    pub const VLAN: u16 = 0x8100;
 }
 
-
-pub fn to_ethertype(ether_type: u16) -> Option<EtherType> {
-    match ether_type {
-        0x0800 => Some(EtherType::IPv4),
-        0x0806 => Some(EtherType::ARP),
-        0x8100 => Some(EtherType::VLAN),
-        0x86DD => Some(EtherType::IPv6),
-        _ => None
-    }
-}
 
 #[derive(PartialEq,Eq)]
 pub struct MacAddress(pub [u8; 6]);
@@ -118,11 +107,11 @@ pub fn create_mac_address(octets: &[u8]) -> MacAddress {
 pub struct EthernetFrame {
     pub source: MacAddress,
     pub destination: MacAddress,
-    pub ethernet_type: EtherType
+    pub ethernet_type: u16
 }
 
 named!(mac_address<&[u8], MacAddress>, map!(take!(6), create_mac_address));
-named!(ethertype<&[u8], EtherType>, map_opt!(u16!(Endianness::Big), to_ethertype));
+named!(ethertype<&[u8], u16>, u16!(Endianness::Big));
 named!(ether_frame<&[u8], EthernetFrame>, do_parse!(
         dest_mac: mac_address >>
         src_mac: mac_address >>
@@ -141,7 +130,7 @@ pub struct Ipv4Packet {
     flags: u8,
     fragment_offset: u16,
     ttl: u8,
-    protocol: TransportProtocol,
+    protocol: u8,
     check_sum: u16,
     source: Ipv4Addr,
     destination: Ipv4Addr,
@@ -179,18 +168,13 @@ pub enum TransportProtocol {
     UDPLite,
 }
 
-
-
-pub fn to_transport_protocol(proto: u8) -> Option<TransportProtocol> {
-    match proto {
-        0x01 => Some(TransportProtocol::ICMP),
-        0x02 => Some(TransportProtocol::IGMP),
-        0x06 => Some(TransportProtocol::TCP),
-        0x08 => Some(TransportProtocol::EGP),
-        0x11 => Some(TransportProtocol::UDP),
-        0x88 => Some(TransportProtocol::UDPLite),
-        _ => None
-    }
+pub mod transport_proto {
+    pub const ICMP: u8 = 0x01;
+    pub const IGMP: u8 = 0x02;
+    pub const TCP: u8 = 0x06;
+    pub const EGP: u8 = 0x08;
+    pub const UDP: u8 = 0x11;
+    pub const UDP_LITE: u8 = 0x88;
 }
 
 
@@ -206,7 +190,6 @@ pub fn make_address(addr: &[u8]) -> Ipv4Addr {
 
 named!(two_nibbles<&[u8], (u8, u8)>, bits!(pair!(take_bits!(u8, 4), take_bits!(u8, 4))));
 named!(flag_frag_offset<&[u8], (u8, u16)>, bits!(pair!(take_bits!(u8, 3), take_bits!(u16, 13))));
-named!(proto<&[u8], TransportProtocol>, map_opt!(be_u8, to_transport_protocol));
 named!(address<&[u8], Ipv4Addr>, map!(take!(4), make_address));
 
 named!(ip_parse<&[u8], Ipv4Packet>, do_parse!(
@@ -216,7 +199,7 @@ named!(ip_parse<&[u8], Ipv4Packet>, do_parse!(
         id: u16!(Endianness::Big) >>
         flagsfragoff: flag_frag_offset >>
         ttl: be_u8 >>
-        protocol: proto >>
+        protocol: be_u8 >>
         chksum: u16!(Endianness::Big) >>
         src_addr: address >>
         dst_addr: address >>
@@ -247,47 +230,12 @@ pub struct TcpHeader {
     sequence_number: u32,
     ack_number: u32,
     data_offset: u8,
-    flags: Vec<TcpFlag>,
+    flags: u16,
     window_size: u16,
     check_sum: u16,
     urgent_pointer: u16
 }
 
-
-#[derive(Debug,PartialEq,Eq,Clone)]
-pub enum TcpFlag {
-    NS  = 0x0100,
-    CWR = 0x0080,
-    ECE = 0x0040,
-    URG = 0x0020,
-    ACK = 0x0010,
-    PSH = 0x0008,
-    RST = 0x0004,
-    SYN = 0x0002,
-    FIN = 0x0001
-}
-
-const TCP_FLAGS: [TcpFlag; 9] = [TcpFlag::FIN, TcpFlag::SYN, TcpFlag::RST, TcpFlag::PSH,
-                                 TcpFlag::ACK, TcpFlag::URG, TcpFlag::ECE, TcpFlag::CWR,
-                                 TcpFlag::NS];
-
-pub fn parse_tcp_flags(flags: u16) -> Vec<TcpFlag> {
-    let mut flags_vec: Vec<TcpFlag> = vec![];
-    
-    for tcp_flag in &TCP_FLAGS {
-        if is_flag_set(tcp_flag.clone(), flags) {
-            flags_vec.push(tcp_flag.clone());
-        }
-    }
-
-    flags_vec
-}
-
-
-pub fn is_flag_set(flag: TcpFlag, flags: u16) -> bool {
-    let f_int = flag as u16;
-    (f_int & flags) == f_int
-}
 
 pub fn is_set(flag: u16, flags: u16) -> bool {
     (flag & flags) == flag
@@ -310,7 +258,7 @@ named!(tcp_parser<&[u8], TcpHeader>, do_parse!(
                 sequence_number: seq_num,
                 ack_number: ack_num,
                 data_offset: doff_flags.0,
-                flags: parse_tcp_flags(doff_flags.1),
+                flags: doff_flags.1,
                 window_size: wnd_size,
                 check_sum: chksum,
                 urgent_pointer: urg_ptr
@@ -343,55 +291,10 @@ named!(udp_parser<&[u8], UdpHeader>, do_parse!(
 
 #[derive(Debug,Eq,PartialEq)]
 struct IcmpHeader {
-    icmp_type: IcmpType,
+    icmp_type: u8,
     code: u8,
     check_sum: u16
 }
-
-#[derive(Debug,Eq,PartialEq)]
-pub enum IcmpType {
-    EchoReply,
-    DestinationUreachable,
-    SourceQuench,
-    RedirectMessage,
-    EchoRequest,
-    RouterAdvertisement,
-    RouterSolicitation,
-    TimeExceeded,
-    ParameterProblemBadIpHeader,
-    Timestamp,
-    TimestampReply,
-    InformationRequest,
-    InformationReply,
-    AddressMaskRequest,
-    AddressMaskReply,
-    Traceroute
-}
-
-impl IcmpType {
-    pub fn from_code(type_: u8) -> Option<IcmpType> {
-        match type_ {
-            0 => Some(IcmpType::EchoReply),
-            3 => Some(IcmpType::DestinationUreachable),
-            4 => Some(IcmpType::SourceQuench),
-            5 => Some(IcmpType::RedirectMessage),
-            8 => Some(IcmpType::EchoRequest),
-            9 => Some(IcmpType::RouterAdvertisement),
-            10 => Some(IcmpType::RouterSolicitation),
-            11 => Some(IcmpType::TimeExceeded),
-            12 => Some(IcmpType::ParameterProblemBadIpHeader),
-            13 => Some(IcmpType::Timestamp),
-            14 => Some(IcmpType::TimestampReply),
-            15 => Some(IcmpType::InformationRequest),
-            16 => Some(IcmpType::InformationReply),
-            17 => Some(IcmpType::AddressMaskRequest),
-            18 => Some(IcmpType::AddressMaskReply),
-            30 => Some(IcmpType::Traceroute),
-            _ => None
-        }
-    }
-}
-
 
 named!(parse_icmp<&[u8], IcmpHeader>, do_parse!(
         type_: be_u8 >>
@@ -399,7 +302,7 @@ named!(parse_icmp<&[u8], IcmpHeader>, do_parse!(
         chksum: u16!(Endianness::Big) >>
         (
             IcmpHeader {
-                icmp_type: IcmpType::from_code(type_).unwrap(),
+                icmp_type: type_,
                 code: code,
                 check_sum: chksum
             }
