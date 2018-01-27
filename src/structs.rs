@@ -52,15 +52,22 @@ impl Extractor for GenericExtractor {
 }
 
 
-struct Column<DATA: 'static> {
+trait Column: Sized {
+    fn apply(&mut self, packet: &[u8]);
+
+    fn get_value(&self) -> Vec<u16>;
+}
+
+
+struct BaseColumn<DATA: 'static> {
     data_manipulator: &'static Fn(&mut DATA, &[u8]) -> (),
     data: DATA,
 }
 
-impl<DATA: Data + 'static> Column<DATA> 
+impl<DATA: Data + 'static> BaseColumn<DATA> 
 {
-    pub fn new(d: DATA, data_manipulator: &'static Fn(&mut DATA, &[u8]) -> ()) -> Column<DATA> {
-        Column {
+    pub fn new(d: DATA, data_manipulator: &'static Fn(&mut DATA, &[u8]) -> ()) -> BaseColumn<DATA> {
+        BaseColumn {
             data_manipulator: data_manipulator,
             data: d,
         }
@@ -68,12 +75,13 @@ impl<DATA: Data + 'static> Column<DATA>
 }
 
 
-impl<DATA: Data + 'static> Column<DATA> {
-    pub fn apply(&mut self, packet: &[u8]) {
+impl<DATA: Data + 'static> Column for BaseColumn<DATA> {
+
+    fn apply(&mut self, packet: &[u8]) {
         (self.data_manipulator)(&mut self.data, packet)
     }
 
-    pub fn get_value(&self) -> Vec<u16> {
+    fn get_value(&self) -> Vec<u16> {
         self.data.get_as_array()
     }
 }
