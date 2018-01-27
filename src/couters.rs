@@ -52,41 +52,29 @@ impl Extractor for GenericExtractor {
 }
 
 
-trait DataManipulator<T: Sized + 'static> {
-    fn apply(&self, d: &mut T, packet: &[u8]);
-
-    fn is_applicable(&self, packet: &[u8]) -> bool;
-}
-
-
-trait IDObtainer<T: Sized + Hash + PartialEq + Eq> {
-    fn get_id(packet: &[u8]) -> T;
-}
-
-
 struct Column<DATA: 'static> {
-    data_manipulator: &'static DataManipulator<DATA>,
+    data_manipulator: &'static Fn(&mut DATA, &[u8]) -> (),
     data: DATA,
-    bit_size: u8
 }
 
-impl<DATA: Data + 'static + Sized + Copy> Column<DATA> 
+impl<DATA: Data + 'static> Column<DATA> 
 {
-    pub fn new(d: DATA, bit_size: u8, data_manipulator: &'static DataManipulator<DATA>) -> Column<DATA> {
+    pub fn new(d: DATA, data_manipulator: &'static Fn(&mut DATA, &[u8]) -> ()) -> Column<DATA> {
         Column {
             data_manipulator: data_manipulator,
             data: d,
-            bit_size: bit_size,
         }
     }
 }
 
 
-impl<DATA: Data + 'static + Sized + Copy> Column<DATA> {
-    fn apply(&mut self, packet: &[u8]) {
-        if self.data_manipulator.is_applicable(packet) {
-            self.data_manipulator.apply(&mut self.data, packet);
-        }
+impl<DATA: Data + 'static> Column<DATA> {
+    pub fn apply(&mut self, packet: &[u8]) {
+        (self.data_manipulator)(&mut self.data, packet)
+    }
+
+    pub fn get_value(&self) -> Vec<u16> {
+        self.data.get_as_array()
     }
 }
 
@@ -177,7 +165,7 @@ impl Data for U8Data {
     type T = u8;
 
     fn get_as_array(&self) -> Vec<u16> {
-        vec![(self.value << 8) as u16]
+        vec![((self.value as u16) << 8) as u16]
     }
 
     fn get_value(&self) -> u8 {
