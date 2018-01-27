@@ -10,7 +10,7 @@ use pcap::{Device, Capture};
 use nom::{Endianness, IResult, be_u8};
 use std::net::Ipv4Addr;
 
-mod couters;
+mod structs;
 
 fn main() {
     let device = Device::list()
