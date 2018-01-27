@@ -53,7 +53,7 @@ impl Extractor for GenericExtractor {
 
 
 trait DataManipulator<T: Sized + 'static> {
-    fn apply(&self, d: &mut Box<T>, packet: &[u8]);
+    fn apply(&self, d: &mut T, packet: &[u8]);
 
     fn is_applicable(&self, packet: &[u8]) -> bool;
 }
@@ -64,29 +64,40 @@ trait IDObtainer<T: Sized + Hash + PartialEq + Eq> {
 }
 
 
-struct Column<T: 'static> {
-    data_manipulator: &'static DataManipulator<Data<T>>,
-    data: Box<Data<T>>,
-    bit_size: &'static u8
+struct Column<DATA: 'static> {
+    data_manipulator: &'static DataManipulator<DATA>,
+    data: DATA,
+    bit_size: u8
 }
 
-impl<T: Sized + 'static> Column<T> {
+impl<DATA: Data + 'static + Sized + Copy> Column<DATA> 
+{
+    pub fn new(d: DATA, bit_size: u8, data_manipulator: &'static DataManipulator<DATA>) -> Column<DATA> {
+        Column {
+            data_manipulator: data_manipulator,
+            data: d,
+            bit_size: bit_size,
+        }
+    }
+}
+
+
+impl<DATA: Data + 'static + Sized + Copy> Column<DATA> {
     fn apply(&mut self, packet: &[u8]) {
         if self.data_manipulator.is_applicable(packet) {
             self.data_manipulator.apply(&mut self.data, packet);
         }
     }
-
-    fn get_value(&self) -> T {
-    }
 }
 
-trait Data<T: Sized + Copy + Clone> {
+trait Data: Sized {
+    type T;
+
     fn get_as_array(&self) -> Vec<u16>;
 
-    fn get_value(&self) -> T;
+    fn get_value(&self) -> Self::T;
 
-    fn set_value(&mut self, value: T);
+    fn set_value(&mut self, value: Self::T);
 }
 
 
@@ -106,7 +117,9 @@ struct U8Data {
     value: u8
 }
 
-impl Data<u64> for U64Data {
+impl Data for U64Data {
+    type T = u64;
+
     fn get_as_array(&self) -> Vec<u16> {
         vec![
             (self.value >> 48) as u16,
@@ -125,7 +138,9 @@ impl Data<u64> for U64Data {
     }
 }
 
-impl Data<u32> for U32Data {
+impl Data for U32Data {
+    type T = u32;
+
     fn get_as_array(&self) -> Vec<u16> {
         vec![
             (self.value >> 16) as u16,
@@ -142,7 +157,9 @@ impl Data<u32> for U32Data {
     }
 }
 
-impl Data<u16> for U16Data {
+impl Data for U16Data {
+    type T = u16;
+
     fn get_as_array(&self) -> Vec<u16> {
         vec![self.value]
     }
@@ -156,7 +173,9 @@ impl Data<u16> for U16Data {
     }
 }
 
-impl Data<u8> for U8Data {
+impl Data for U8Data {
+    type T = u8;
+
     fn get_as_array(&self) -> Vec<u16> {
         vec![(self.value << 8) as u16]
     }
